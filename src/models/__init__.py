@@ -13,6 +13,11 @@ from .check import (
     CheckResult,
     CheckReport,
 )
+from .frappe import (
+    FrappeCheckInput,
+    FrappeCheckOutput,
+    FrappeError,
+)
 
 __all__ = [
     "FichePayeExtracted",
@@ -24,4 +29,7 @@ __all__ = [
     "LeaveBalance",
     "CheckResult",
     "CheckReport",
+    "FrappeCheckInput",
+    "FrappeCheckOutput",
+    "FrappeError",
 ]

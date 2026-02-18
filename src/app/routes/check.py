@@ -14,6 +14,8 @@ async def check(
     file: UploadFile = File(...),
     smic_mensuel: float = Form(...),
     effectif_50_et_plus: bool = Form(...),
+    plafond_ss: float = Form(...),
+    include_frappe_check: bool = Form(default=False),
 ) -> CheckReport:
     """
     Vérifie une fiche de paie PDF et retourne un rapport de contrôle.
@@ -22,6 +24,8 @@ async def check(
         file: Fichier PDF à analyser.
         smic_mensuel: SMIC mensuel brut en vigueur (ex: 1823.03).
         effectif_50_et_plus: True si l'entreprise a 50 salariés ou plus.
+        plafond_ss: Plafond de la Sécurité Sociale en vigueur (4005).
+        include_frappe_check: Si True, inclut le check des fautes de frappe via LLM.
 
     Returns:
         CheckReport: Rapport avec les résultats de tous les tests de vérification.
@@ -31,7 +35,13 @@ async def check(
         fiche = await scan_payslip(file)
 
         # Exécuter les vérifications
-        return run_checks(fiche, smic_mensuel, effectif_50_et_plus)
+        return await run_checks(
+            fiche,
+            smic_mensuel,
+            effectif_50_et_plus,
+            plafond_ss,
+            include_frappe_check,
+        )
 
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
