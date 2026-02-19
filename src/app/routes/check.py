@@ -16,6 +16,7 @@ async def check(
     effectif_50_et_plus: bool = Form(...),
     plafond_ss: float = Form(...),
     include_frappe_check: bool = Form(default=False),
+    include_analyse_llm: bool = Form(default=False),
 ) -> CheckReport:
     """
     Vérifie une fiche de paie PDF et retourne un rapport de contrôle.
@@ -26,6 +27,7 @@ async def check(
         effectif_50_et_plus: True si l'entreprise a 50 salariés ou plus.
         plafond_ss: Plafond de la Sécurité Sociale en vigueur (4005).
         include_frappe_check: Si True, inclut le check des fautes de frappe via LLM.
+        include_analyse_llm: Si True, inclut l'analyse de cohérence avec la convention collective via LLM.
 
     Returns:
         CheckReport: Rapport avec les résultats de tous les tests de vérification.
@@ -41,6 +43,7 @@ async def check(
             effectif_50_et_plus,
             plafond_ss,
             include_frappe_check,
+            include_analyse_llm,
         )
 
     except ValueError as e:

@@ -4,6 +4,7 @@ from .fiscal import check_fiscal
 from .csg import check_csg
 from .allocations_familiales import check_allocations_familiales
 from .frappe import check_frappe
+from .convention import check_convention
 
 __all__ = [
     "calculer_rgdu",
@@ -13,4 +14,5 @@ __all__ = [
     "check_csg",
     "check_allocations_familiales",
     "check_frappe",
+    "check_convention",
 ]

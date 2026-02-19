@@ -18,6 +18,18 @@ from .frappe import (
     FrappeCheckOutput,
     FrappeError,
 )
+from .licenciement import (
+    TypeRupture,
+    MotifLicenciement,
+    ConventionCollective,
+    PeriodeTravail,
+    LicenciementInput,
+    LicenciementResult,
+)
+from .convention_check import (
+    ConventionWarning,
+    ConventionCheckOutput,
+)
 
 __all__ = [
     "FichePayeExtracted",
@@ -32,4 +44,12 @@ __all__ = [
     "FrappeCheckInput",
     "FrappeCheckOutput",
     "FrappeError",
+    "TypeRupture",
+    "MotifLicenciement",
+    "ConventionCollective",
+    "PeriodeTravail",
+    "LicenciementInput",
+    "LicenciementResult",
+    "ConventionWarning",
+    "ConventionCheckOutput",
 ]
