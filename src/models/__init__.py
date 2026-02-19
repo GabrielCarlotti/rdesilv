@@ -25,6 +25,8 @@ from .licenciement import (
     PeriodeTravail,
     LicenciementInput,
     LicenciementResult,
+    SalaireMensuel,
+    LicenciementPdfExtraction,
 )
 from .convention_check import (
     ConventionWarning,
@@ -50,6 +52,8 @@ __all__ = [
     "PeriodeTravail",
     "LicenciementInput",
     "LicenciementResult",
+    "SalaireMensuel",
+    "LicenciementPdfExtraction",
     "ConventionWarning",
     "ConventionCheckOutput",
 ]

@@ -15,6 +15,23 @@ from src.models.check import CheckResult
 # Numéros de lignes standards
 LIGNE_CSG_DEDUCTIBLE = "73000"
 LIGNE_MUTUELLE = "58000"
+LIGNE_MALADIE_NON_RESIDENT = "20065"
+
+# Patterns pour détecter les non-résidents fiscaux
+PATTERNS_NON_RESIDENT = [
+    "non résident",
+    "non resident",
+    "non-résident",
+    "non-resident",
+]
+
+# Patterns pour détecter les apprentis (exonérés de CSG/CRDS)
+PATTERNS_APPRENTI = [
+    "apprenti",
+    "app exo",
+    "appr non exo",
+    "base apprenti",
+]
 
 # Taux d'abattement pour frais professionnels
 TAUX_ABATTEMENT = Decimal("0.9825")  # 98.25%
@@ -38,11 +55,46 @@ def _est_ligne_prevoyance(libelle: str) -> bool:
     return False
 
 
+def _is_non_resident(fiche: FichePayeExtracted) -> bool:
+    """Détecte si le salarié est non-résident fiscal français."""
+    # Vérifier par numéro de ligne connu
+    if LIGNE_MALADIE_NON_RESIDENT in fiche.lignes:
+        return True
+
+    # Vérifier par pattern dans les libellés
+    for ligne in fiche.lignes.values():
+        libelle_lower = ligne.libelle.lower()
+        for pattern in PATTERNS_NON_RESIDENT:
+            if pattern in libelle_lower:
+                return True
+
+    return False
+
+
+def _is_apprenti(fiche: FichePayeExtracted) -> bool:
+    """Détecte si le salarié est un apprenti (exonéré de CSG/CRDS)."""
+    # Vérifier par pattern dans les libellés des lignes
+    for ligne in fiche.lignes.values():
+        libelle_lower = ligne.libelle.lower()
+        if any(pattern in libelle_lower for pattern in PATTERNS_APPRENTI):
+            return True
+
+    # Vérifier dans l'emploi/qualification si disponible
+    if fiche.employe.emploi and "apprenti" in fiche.employe.emploi.lower():
+        return True
+    if fiche.employe.qualification and "apprenti" in fiche.employe.qualification.lower():
+        return True
+
+    return False
+
+
 def check_csg(fiche: FichePayeExtracted) -> CheckResult:
     """
     Vérifie la cohérence de la base CSG.
 
     Base CSG = (Brut × 98.25%) + Part Patronale Mutuelle + Part Patronale Prévoyance
+
+    Note: Les salariés non-résidents fiscaux français sont exonérés de CSG/CRDS.
 
     Args:
         fiche: Fiche de paie extraite.
@@ -50,6 +102,32 @@ def check_csg(fiche: FichePayeExtracted) -> CheckResult:
     Returns:
         CheckResult avec le résultat de la vérification.
     """
+    # Vérifier si le salarié est non-résident fiscal (exonéré de CSG/CRDS)
+    if _is_non_resident(fiche):
+        return CheckResult(
+            test_name="csg",
+            valid=True,
+            is_line_error=False,
+            line_number=None,
+            obtained_value=None,
+            expected_value=None,
+            difference=None,
+            message="Salarié non-résident fiscal français. Exonéré de CSG/CRDS.",
+        )
+
+    # Vérifier si le salarié est apprenti (exonéré totalement de CSG/CRDS)
+    if _is_apprenti(fiche):
+        return CheckResult(
+            test_name="csg",
+            valid=True,
+            is_line_error=False,
+            line_number=None,
+            obtained_value=None,
+            expected_value=None,
+            difference=None,
+            message="Salarié apprenti détecté. Exonéré totalement de CSG/CRDS.",
+        )
+
     # Récupérer la base CSG déclarée (depuis la ligne CSG déductible)
     base_csg_declaree: Decimal | None = None
     ligne_csg = fiche.lignes.get(LIGNE_CSG_DEDUCTIBLE)

@@ -1,5 +1,6 @@
 """Modèles pour le calcul d'indemnité de licenciement et rupture conventionnelle."""
 
+from datetime import date
 from decimal import Decimal
 from enum import Enum
 from pydantic import BaseModel, Field
@@ -47,19 +48,20 @@ class LicenciementInput(BaseModel):
         description="Type de rupture: licenciement ou rupture_conventionnelle"
     )
 
-    # Ancienneté brute (sans préavis)
-    anciennete_mois_brute: int = Field(
+    # Dates clés
+    date_entree: date = Field(
         ...,
-        ge=0,
-        description="Ancienneté en mois du premier jour du contrat jusqu'à la date de notification (licenciement) ou date de fin convenue (rupture conv.)"
+        description="Date d'entrée dans l'entreprise (premier jour du contrat)"
     )
 
-    # Préavis (uniquement pour licenciement)
-    preavis_mois: int = Field(
-        default=0,
-        ge=0,
-        le=3,
-        description="Durée du préavis en mois (0 à 3). S'ajoute à l'ancienneté pour le calcul, même si dispensé. Ignoré pour rupture conventionnelle."
+    date_notification: date | None = Field(
+        default=None,
+        description="Date de notification du licenciement (envoi de la lettre). Requis pour licenciement."
+    )
+
+    date_fin_contrat: date = Field(
+        ...,
+        description="Date de fin du contrat de travail (fin du préavis pour licenciement, date convenue pour rupture conv.)"
     )
 
     # Motif (uniquement pour licenciement)
@@ -181,3 +183,49 @@ class LicenciementResult(BaseModel):
     # Éligibilité
     eligible: bool = Field(..., description="Si le salarié est éligible à l'indemnité")
     raison_ineligibilite: str | None = Field(default=None, description="Raison si non éligible")
+
+
+class SalaireMensuel(BaseModel):
+    """Salaire brut extrait d'une fiche de paie."""
+    mois: int = Field(..., ge=1, le=12, description="Mois de la paie")
+    annee: int = Field(..., description="Année de la paie")
+    salaire_brut: Decimal = Field(..., description="Salaire brut du mois")
+
+
+class LicenciementPdfExtraction(BaseModel):
+    """Données extraites des fiches de paie pour pré-remplir le formulaire de licenciement."""
+
+    # Extraction réussie
+    extraction_success: bool = Field(default=True, description="Si l'extraction a réussi")
+    extraction_errors: list[str] = Field(default_factory=list, description="Erreurs rencontrées")
+
+    # Données extraites
+    date_entree: date | None = Field(
+        default=None,
+        description="Date d'entrée dans l'entreprise (extraite de la fiche)"
+    )
+
+    convention_collective: ConventionCollective = Field(
+        default=ConventionCollective.AUCUNE,
+        description="Convention collective détectée"
+    )
+
+    convention_collective_brute: str | None = Field(
+        default=None,
+        description="Convention collective telle qu'écrite sur la fiche (avant mapping)"
+    )
+
+    # Salaires extraits (triés du plus récent au plus ancien)
+    salaires_extraits: list[SalaireMensuel] = Field(
+        default_factory=list,
+        description="Salaires bruts extraits, triés du plus récent (M-1) au plus ancien (M-12)"
+    )
+
+    # Liste pour le front (juste les montants dans l'ordre)
+    salaires_12_derniers_mois: list[Decimal] = Field(
+        default_factory=list,
+        description="Salaires bruts des 12 derniers mois (du plus récent au plus ancien)"
+    )
+
+    # Nombre de fiches extraites
+    nombre_fiches_extraites: int = Field(default=0, description="Nombre de fiches de paie extraites du PDF")

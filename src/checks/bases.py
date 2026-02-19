@@ -21,21 +21,22 @@ from src.models.check import CheckResult
 
 
 # Patterns pour identifier les tranches
+# Note: On utilise (?:\b|_|\s) après T1/T2 pour gérer les variantes T1_1, T2 1, etc.
 PATTERNS_T1 = [
-    r"\bT1\b",
+    r"\bT1(?:\b|_|\s)",  # T1, T1_1, T1 1, etc.
     r"\bTA\b",
     r"\btranche\s*1\b",
     r"\btranche\s*A\b",
-    r"\bsur\s+T1\b",
+    r"\bsur\s+T1(?:\b|_|\s)",
     r"\bsur\s+TA\b",
 ]
 
 PATTERNS_T2 = [
-    r"\bT2\b",
+    r"\bT2(?:\b|_|\s)",  # T2, T2_1, T2 1, etc.
     r"\bTB\b",
     r"\btranche\s*2\b",
     r"\btranche\s*B\b",
-    r"\bsur\s+T2\b",
+    r"\bsur\s+T2(?:\b|_|\s)",
     r"\bsur\s+TB\b",
 ]
 
@@ -199,8 +200,39 @@ def check_bases(
         difference = ligne.base - base_attendue
         valid = abs(difference) <= TOLERANCE
 
+        # Variables pour la gestion des bases fractionnées (cas Apprenti)
+        is_split = False
+        complement_line = ""
+        complement_base = Decimal("0")
+
+        # Gestion des bases fractionnées (cas de l'Apprenti)
+        # Si la base est inférieure à l'attendu, chercher une ligne complémentaire du même type
+        if not valid and ligne.base < base_attendue:
+            for other_num, other_line in fiche.lignes.items():
+                if other_num == numero:
+                    continue
+                # Vérifier si c'est le même type de tranche
+                if _get_tranche_type(other_line.libelle) != tranche_type:
+                    continue
+                if other_line.base is None:
+                    continue
+                # Vérifier si la somme des deux bases correspond à l'attendu
+                somme_bases = ligne.base + other_line.base
+                if abs(somme_bases - base_attendue) <= TOLERANCE:
+                    valid = True
+                    is_split = True
+                    difference = Decimal("0")
+                    complement_line = other_num
+                    complement_base = other_line.base
+                    break
+
         # Construire le message explicatif
-        if tranche_type == "t1":
+        if is_split:
+            formule = (
+                f"Base fractionnée validée : {ligne.base}€ + {complement_base}€ "
+                f"(ligne {complement_line}) = {base_attendue}€"
+            )
+        elif tranche_type == "t1":
             formule = f"MIN(plafond_proratisé={plafond_proratise}€, brut={brut}€)"
         elif tranche_type == "t2_retraite":
             formule = f"MAX(0, MIN(brut={brut}€, 8×plafond={plafond_proratise*8}€) - plafond={plafond_proratise}€)"

@@ -1,5 +1,6 @@
 """Service de calcul de l'indemnité de licenciement et rupture conventionnelle."""
 
+from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
 
 from src.models.licenciement import (
@@ -11,20 +12,62 @@ from src.models.licenciement import (
 )
 
 
+def _calculer_mois_entre_dates(date_debut: date, date_fin: date) -> int:
+    """
+    Calcule le nombre de mois complets entre deux dates.
+
+    Le calcul est fait en mois entiers (proratisation des jours).
+    """
+    if date_fin < date_debut:
+        return 0
+
+    # Calcul en mois
+    mois = (date_fin.year - date_debut.year) * 12 + (date_fin.month - date_debut.month)
+
+    # Ajuster si le jour de fin est avant le jour de début (mois incomplet)
+    if date_fin.day < date_debut.day:
+        mois -= 1
+
+    return max(0, mois)
+
+
+def _calculer_preavis_mois(data: LicenciementInput) -> int:
+    """
+    Calcule la durée du préavis en mois.
+
+    Pour licenciement: préavis = date_fin_contrat - date_notification
+    Pour rupture conventionnelle: pas de préavis (0)
+    """
+    if data.type_rupture == TypeRupture.RUPTURE_CONVENTIONNELLE:
+        return 0
+
+    if data.date_notification is None:
+        return 0
+
+    return _calculer_mois_entre_dates(data.date_notification, data.date_fin_contrat)
+
+
+def _calculer_anciennete_brute_mois(data: LicenciementInput) -> int:
+    """
+    Calcule l'ancienneté brute en mois (sans préavis).
+
+    Pour licenciement: date_notification - date_entree
+    Pour rupture conventionnelle: date_fin_contrat - date_entree
+    """
+    if data.type_rupture == TypeRupture.LICENCIEMENT and data.date_notification:
+        return _calculer_mois_entre_dates(data.date_entree, data.date_notification)
+    else:
+        return _calculer_mois_entre_dates(data.date_entree, data.date_fin_contrat)
+
+
 def _calculer_anciennete_totale(data: LicenciementInput) -> int:
     """
     Calcule l'ancienneté totale en mois.
 
-    Pour licenciement: ancienneté brute + préavis (même si dispensé)
-    Pour rupture conventionnelle: ancienneté brute uniquement (pas de préavis)
+    Pour licenciement: date_fin_contrat - date_entree (inclut le préavis)
+    Pour rupture conventionnelle: date_fin_contrat - date_entree
     """
-    anciennete = data.anciennete_mois_brute
-
-    # Ajouter le préavis pour licenciement uniquement
-    if data.type_rupture == TypeRupture.LICENCIEMENT:
-        anciennete += data.preavis_mois
-
-    return anciennete
+    return _calculer_mois_entre_dates(data.date_entree, data.date_fin_contrat)
 
 
 def _calculer_anciennete_effective(data: LicenciementInput) -> int:
@@ -190,7 +233,7 @@ def calculer_indemnite_licenciement(data: LicenciementInput) -> LicenciementResu
 
     Pour licenciement:
     - Vérifie le motif (faute grave/lourde = pas d'indemnité)
-    - Inclut le préavis dans l'ancienneté
+    - Inclut le préavis dans l'ancienneté (calculé depuis les dates)
     - Double l'indemnité pour inaptitude professionnelle
 
     Pour rupture conventionnelle:
@@ -200,7 +243,7 @@ def calculer_indemnite_licenciement(data: LicenciementInput) -> LicenciementResu
     - Même calcul minimum que le licenciement
     """
     type_rupture = data.type_rupture
-    preavis_mois = data.preavis_mois if type_rupture == TypeRupture.LICENCIEMENT else 0
+    preavis_mois = _calculer_preavis_mois(data)
 
     # Pour licenciement: vérifier le motif
     if type_rupture == TypeRupture.LICENCIEMENT:
@@ -221,6 +264,24 @@ def calculer_indemnite_licenciement(data: LicenciementInput) -> LicenciementResu
                 explication="Le motif du licenciement est requis.",
                 eligible=False,
                 raison_ineligibilite="Motif de licenciement non spécifié.",
+            )
+
+        if data.date_notification is None:
+            return LicenciementResult(
+                type_rupture=type_rupture,
+                montant_indemnite=Decimal("0"),
+                montant_minimum=Decimal("0"),
+                salaire_reference=Decimal("0"),
+                methode_salaire_reference="non_applicable",
+                anciennete_retenue_mois=0,
+                anciennete_retenue_annees=Decimal("0"),
+                indemnite_legale=Decimal("0"),
+                indemnite_conventionnelle=None,
+                multiplicateur=Decimal("1"),
+                preavis_mois=0,
+                explication="La date de notification est requise pour un licenciement.",
+                eligible=False,
+                raison_ineligibilite="Date de notification non spécifiée.",
             )
 
         # Faute grave/lourde = pas d'indemnité
@@ -329,6 +390,10 @@ def calculer_indemnite_licenciement(data: LicenciementInput) -> LicenciementResu
         explication_parts.append(f"Licenciement pour motif {motifs_labels[data.motif]}.")  # type: ignore
     else:
         explication_parts.append("Rupture conventionnelle.")
+
+    # Dates
+    explication_parts.append(f"Date d'entrée: {data.date_entree.strftime('%d/%m/%Y')}.")
+    explication_parts.append(f"Date de fin de contrat: {data.date_fin_contrat.strftime('%d/%m/%Y')}.")
 
     # Préavis (licenciement uniquement)
     if type_rupture == TypeRupture.LICENCIEMENT and preavis_mois > 0:

@@ -76,13 +76,16 @@ Calcule l'indemnité de licenciement ou de rupture conventionnelle.
 | Paramètre | Type | Description |
 |-----------|------|-------------|
 | `type_rupture` | enum | `licenciement` ou `rupture_conventionnelle` |
-| `anciennete_mois_brute` | int | Ancienneté en mois (sans préavis) |
-| `preavis_mois` | int | Durée du préavis (0-3 mois, licenciement uniquement) |
-| `motif` | enum | Motif du licenciement (voir ci-dessous) |
+| `date_entree` | date | Date d'entrée dans l'entreprise (YYYY-MM-DD) |
+| `date_notification` | date | Date de notification du licenciement (requis pour licenciement) |
+| `date_fin_contrat` | date | Date de fin du contrat (fin préavis pour licenciement, date convenue pour rupture conv.) |
+| `motif` | enum | Motif du licenciement (requis pour licenciement) |
 | `convention_collective` | enum | `aucune` ou `ccn_1966` |
 | `salaires_12_derniers_mois` | array[Decimal] | Salaires bruts des 12 derniers mois |
 | `primes_annuelles_3_derniers_mois` | Decimal | Primes annuelles dans les 3 derniers mois |
 | `indemnite_supralegale` | Decimal | Montant négocié en plus (rupture conv. uniquement) |
+| `mois_suspendus_non_comptes` | int | Mois à déduire (congé sans solde, sabbatique, maladie non pro) |
+| `mois_conge_parental_temps_plein` | int | Mois de congé parental temps plein (compte pour 50%) |
 | `age_salarie` | int | Requis pour CCN 1966 (plafond 65 ans) |
 | `salaire_mensuel_actuel` | Decimal | Requis pour CCN 1966 |
 
@@ -94,24 +97,29 @@ Calcule l'indemnité de licenciement ou de rupture conventionnelle.
 - `faute_grave` - Pas d'indemnité
 - `faute_lourde` - Pas d'indemnité
 
+**Calcul de l'ancienneté:**
+- **Licenciement:** `date_fin_contrat - date_entree` (le préavis est inclus automatiquement)
+- **Rupture conv.:** `date_fin_contrat - date_entree` (pas de préavis)
+
 **Calculs effectués:**
 
-1. **Salaire de référence** = max(moyenne 12 mois, moyenne 3 mois avec primes proratisées)
-2. **Indemnité légale:**
+1. **Préavis** (licenciement) = `date_fin_contrat - date_notification`
+2. **Salaire de référence** = max(moyenne 12 mois, moyenne 3 mois avec primes proratisées)
+3. **Indemnité légale:**
    - ≤ 10 ans : 1/4 mois par année
    - > 10 ans : 1/3 mois par année supplémentaire
-3. **Indemnité CCN 1966** (si applicable):
+4. **Indemnité CCN 1966** (si applicable):
    - 1/2 mois par année
    - Plafond : 6 mois de salaire
    - Plafond : rémunérations jusqu'à 65 ans
-4. **Principe de faveur** : on retient le montant le plus élevé
-5. **Multiplicateur x2** si inaptitude professionnelle
+5. **Principe de faveur** : on retient le montant le plus élevé
+6. **Multiplicateur x2** si inaptitude professionnelle
 
 **Différences licenciement vs rupture conventionnelle:**
 | | Licenciement | Rupture conventionnelle |
 |--|--------------|------------------------|
 | Motif | Requis | Aucun |
-| Préavis | Compte dans l'ancienneté | Pas de préavis |
+| Préavis | Calculé auto (date_fin - date_notif) | Pas de préavis |
 | Supralégal | Non | Négociable |
 
 **Sources:**
@@ -125,7 +133,47 @@ Calcule l'indemnité de licenciement ou de rupture conventionnelle.
   "montant_minimum": 12500.00,
   "salaire_reference": 2500.00,
   "anciennete_retenue_annees": 5.0,
-  "explication": "Licenciement pour motif économique. Ancienneté retenue: 5 an(s). ..."
+  "preavis_mois": 2,
+  "explication": "Licenciement pour motif économique. Date d'entrée: 01/01/2020. Date de fin: 01/03/2025. Préavis de 2 mois. Ancienneté retenue: 5 an(s) et 2 mois. ..."
+}
+```
+
+---
+
+### 4. `POST /licenciementpdf` - Extraction depuis fiches de paie
+
+Extrait les données des 12 dernières fiches de paie pour pré-remplir le formulaire de licenciement.
+
+**Entrée (multipart/form-data):**
+| Paramètre | Type | Description |
+|-----------|------|-------------|
+| `file` | File | PDF contenant les 12 fiches de paie concaténées |
+
+**Données extraites:**
+- `date_entree` - Date d'entrée dans l'entreprise
+- `convention_collective` - Convention détectée automatiquement
+- `salaires_12_derniers_mois` - Salaires bruts extraits et triés
+
+**Workflow:**
+1. Le frontend upload le PDF avec les 12 fiches
+2. L'API extrait les données et les renvoie
+3. Le frontend pré-remplit le formulaire
+4. L'utilisateur complète/corrige (dates, primes, ajustements)
+5. Le frontend appelle `/licenciement` avec les données finales
+
+**Sortie:** `LicenciementPdfExtraction` (JSON)
+```json
+{
+  "extraction_success": true,
+  "date_entree": "2020-01-15",
+  "convention_collective": "ccn_1966",
+  "convention_collective_brute": "Convention collective du 15 mars 1966",
+  "salaires_12_derniers_mois": [2500, 2500, 2500, 2500, 2500, 2500, 2500, 2500, 2500, 2500, 2500, 2500],
+  "salaires_extraits": [
+    {"mois": 12, "annee": 2024, "salaire_brut": 2500},
+    {"mois": 11, "annee": 2024, "salaire_brut": 2500}
+  ],
+  "nombre_fiches_extraites": 12
 }
 ```
 
@@ -152,7 +200,7 @@ uv run dev
 ## Exemples de requêtes
 
 ```bash
-# Extraction
+# Extraction simple
 curl -X POST http://localhost:8000/extraction \
   -F "file=@fiche.pdf"
 
@@ -165,13 +213,18 @@ curl -X POST http://localhost:8000/check \
   -F "include_frappe_check=true" \
   -F "include_analyse_llm=true"
 
+# Extraction depuis PDF pour licenciement
+curl -X POST http://localhost:8000/licenciementpdf \
+  -F "file=@12_fiches_de_paie.pdf"
+
 # Calcul licenciement
 curl -X POST http://localhost:8000/licenciement \
   -H "Content-Type: application/json" \
   -d '{
     "type_rupture": "licenciement",
-    "anciennete_mois_brute": 58,
-    "preavis_mois": 2,
+    "date_entree": "2020-01-15",
+    "date_notification": "2025-01-01",
+    "date_fin_contrat": "2025-03-01",
     "motif": "economique",
     "salaires_12_derniers_mois": [2500, 2500, 2500, 2500, 2500, 2500, 2500, 2500, 2500, 2500, 2500, 2500]
   }'
@@ -181,7 +234,8 @@ curl -X POST http://localhost:8000/licenciement \
   -H "Content-Type: application/json" \
   -d '{
     "type_rupture": "rupture_conventionnelle",
-    "anciennete_mois_brute": 60,
+    "date_entree": "2020-01-15",
+    "date_fin_contrat": "2025-02-15",
     "salaires_12_derniers_mois": [3000, 3000, 3000, 3000, 3000, 3000, 3000, 3000, 3000, 3000, 3000, 3000],
     "indemnite_supralegale": 5000
   }'

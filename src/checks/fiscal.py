@@ -2,7 +2,13 @@
 Check Fiscal : Reconstruction du Net Imposable.
 
 Règle:
-Net Imposable = Net à Payer (avant PAS) + CSG Non Déductible + CRDS + Part Patronale Mutuelle
+Net Imposable = Net à Payer (avant PAS) - Frais Non Imposables + CSG Non Déductible + CRDS + Part Patronale Mutuelle
+
+Les frais non imposables comprennent :
+- Remboursement transport (Navigo, etc.)
+- Indemnités kilométriques
+- Paniers repas
+- Autres indemnités exonérées
 """
 
 from decimal import Decimal
@@ -17,14 +23,68 @@ LIGNE_CSG_NON_DEDUCTIBLE = "75050"
 LIGNE_CRDS = "75060"
 LIGNE_MUTUELLE = "58000"
 
+# Lignes de frais non imposables (à soustraire du net avant PAS)
+LIGNES_FRAIS_NON_IMPOSABLES = [
+    "81000",  # Remboursement transport
+    "81001",  # Indemnité kilométrique
+    "81002",  # Panier repas
+    "81010",  # Remboursement frais
+    "81100",  # Indemnité transport
+    "81200",  # Prime transport
+]
+
+# Patterns pour détecter les frais non imposables par libellé
+PATTERNS_FRAIS_NON_IMPOSABLES = [
+    "remboursement transport",
+    "rembours. transport",
+    "indemnité transport",
+    "indem. transport",
+    "frais transport",
+    "navigo",
+    "indemnité kilom",
+    "indem. kilom",
+    "panier",
+    "titre restaurant",
+    "ticket restaurant",
+]
+
 TOLERANCE = Decimal("0.50")
+
+
+def _detect_frais_non_imposables(fiche: FichePayeExtracted) -> Decimal:
+    """
+    Détecte et somme les frais non imposables dans la fiche de paie.
+
+    Ces montants gonflent le net à payer mais ne sont pas imposables.
+    """
+    total_frais = Decimal("0")
+
+    for numero, ligne in fiche.lignes.items():
+        # Vérifier par numéro de ligne connu
+        if numero in LIGNES_FRAIS_NON_IMPOSABLES:
+            if ligne.montant_salarial and ligne.montant_salarial > 0:
+                total_frais += ligne.montant_salarial
+            continue
+
+        # Vérifier par pattern dans le libellé
+        libelle_lower = ligne.libelle.lower()
+        for pattern in PATTERNS_FRAIS_NON_IMPOSABLES:
+            if pattern in libelle_lower:
+                if ligne.montant_salarial and ligne.montant_salarial > 0:
+                    total_frais += ligne.montant_salarial
+                break
+
+    return total_frais
 
 
 def check_fiscal(fiche: FichePayeExtracted) -> CheckResult:
     """
     Vérifie la cohérence du net imposable.
 
-    Net Imposable = Net avant PAS + CSG Non Déductible + CRDS + Part Patronale Mutuelle
+    Net Imposable = Net avant PAS - Frais Non Imposables + CSG Non Déductible + CRDS + Part Patronale Mutuelle
+
+    Les frais non imposables (remboursement transport, indemnités km, etc.)
+    gonflent le net à payer mais ne sont pas imposables.
 
     Args:
         fiche: Fiche de paie extraite.
@@ -66,6 +126,9 @@ def check_fiscal(fiche: FichePayeExtracted) -> CheckResult:
             message="Impossible de vérifier le net imposable: net avant PAS non trouvé.",
         )
 
+    # Détecter les frais non imposables
+    frais_non_imposables = _detect_frais_non_imposables(fiche)
+
     # Récupérer CSG non déductible (valeur absolue car souvent négative)
     csg_non_ded = Decimal("0")
     ligne_csg = fiche.lignes.get(LIGNE_CSG_NON_DEDUCTIBLE)
@@ -85,20 +148,34 @@ def check_fiscal(fiche: FichePayeExtracted) -> CheckResult:
         mutuelle_pat = abs(ligne_mut.montant_patronal)
 
     # Calculer le net imposable attendu
-    net_imposable_calcule = net_avant_pas + csg_non_ded + crds + mutuelle_pat
+    # Net Imposable = Net avant PAS - Frais Non Imposables + CSG ND + CRDS + Mutuelle Pat
+    net_imposable_calcule = net_avant_pas - frais_non_imposables + csg_non_ded + crds + mutuelle_pat
 
     difference = net_imposable_declare - net_imposable_calcule
     valid = abs(difference) <= TOLERANCE
 
-    message = (
-        f"Net Imposable = Net avant PAS ({net_avant_pas}€) "
-        f"+ CSG Non Déductible ({csg_non_ded}€) "
-        f"+ CRDS ({crds}€) "
-        f"+ Mutuelle Patronale ({mutuelle_pat}€) "
-        f"= {net_imposable_calcule}€. "
-        f"Valeur déclarée: {net_imposable_declare}€. "
-        f"Écart: {difference}€."
-    )
+    # Construire le message
+    if frais_non_imposables > 0:
+        message = (
+            f"Net Imposable = Net avant PAS ({net_avant_pas}€) "
+            f"- Frais non imposables ({frais_non_imposables}€) "
+            f"+ CSG Non Déductible ({csg_non_ded}€) "
+            f"+ CRDS ({crds}€) "
+            f"+ Mutuelle Patronale ({mutuelle_pat}€) "
+            f"= {net_imposable_calcule}€. "
+            f"Valeur déclarée: {net_imposable_declare}€. "
+            f"Écart: {difference}€."
+        )
+    else:
+        message = (
+            f"Net Imposable = Net avant PAS ({net_avant_pas}€) "
+            f"+ CSG Non Déductible ({csg_non_ded}€) "
+            f"+ CRDS ({crds}€) "
+            f"+ Mutuelle Patronale ({mutuelle_pat}€) "
+            f"= {net_imposable_calcule}€. "
+            f"Valeur déclarée: {net_imposable_declare}€. "
+            f"Écart: {difference}€."
+        )
 
     return CheckResult(
         test_name="fiscal",
